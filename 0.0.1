@@ -1,0 +1,55 @@
+#!/bin/bash
+
+# Use Droidstyle Icon in the Notification, set the local repo-path
+icon='/usr/share/icons/Humanity/devices/24/phone-motorola-droid.svg'
+DIR=`dirname $(readlink $0)`
+
+# Ensure baseline exists as-is
+[ -f $DIR/baselineusb ] || lsusb > "$DIR/baselineusb"
+# Delete the USB Change stub if it already exists
+[ -f /tmp/deltausb ] && rm -f /tmp/deltausb
+
+# Function to ensure adb is started and launch droidcam (both silently)
+function start_droidcam() {
+  adb devices > /tmp/adb_devices 2>&1 &
+  droidcam > /dev/null 2>&1 &
+}
+
+# Function to Update baseline file so USB plug-change is not repeated
+function update_baseline() {
+  cp -f /tmp/compareusb $DIR/baselineusb
+  rm /tmp/deltausb
+}
+
+# Function to Close Droidcam
+function kill_droidcam() {
+  while [[ $(ps|grep droidcam) ]]
+  do
+    killall droidcam
+  done
+}
+
+# Watcher Loop, runs every 5 seconds
+while true
+do
+# Copy connected USB devices to the compare-file
+  lsusb > /tmp/compareusb
+# Create USB change stub by comparing compare-file and baseline
+  diff /tmp/compareusb $DIR/baselineusb >> /tmp/deltausb
+  if [[ $(grep '<' /tmp/deltausb && grep 'Samsung' /tmp/deltausb) ]]
+  then
+# When connected, notify the user and start droidcam if its not running
+    notify-send -i $icon -t 15000 'Samsung Connected' 'Starting Droidcam'
+    [[ $(ps|grep droidcam) ]]||start_droidcam
+# Remember the connection, instead of notifying every 5 seconds
+    update_baseline
+  elif [[ $(grep '>' /tmp/deltausb && grep 'Samsung' /tmp/deltausb) ]]
+  then
+# When disconnected, notify the user and kill active droidcam sessions
+    notify-send -i $icon -t 15000 'Samsung Disconnected' 'Terminating Droidcam'
+# Remember that device has been disconnected instead of notifying every 5 seconds
+    kill_droidcam && update_baseline
+  fi
+# Wait 5 seconds before repeating
+  sleep 5
+done
